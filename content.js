@@ -4,38 +4,50 @@ const DEFAULT_PROMPT =
 const TEXTAREA_SELECTORS = [
   '[data-testid="tweetTextarea_0"][contenteditable="true"]',
   '[data-testid="tweetTextarea_0"] [contenteditable="true"]',
-  '[data-testid="tweetTextarea_0"]',
 ];
 
-const AI_BTN_ID = 'smart-reply-ai-btn';
+const AI_BTN_CLASS = 'smart-reply-ai-btn';
+let isGenerating = false;
+
+function isVisible(el) {
+  const { width, height } = el.getBoundingClientRect();
+  return width > 0 && height > 0;
+}
 
 function getTweetText(toolBar) {
-  const article = toolBar.closest('article') ?? toolBar.closest('[data-testid="tweet"]');
-  if (article) {
+  const sources = [
+    toolBar.closest('article'),
+    toolBar.closest('[data-testid="tweet"]'),
+    toolBar.closest('[role="dialog"]'),
+  ];
+  for (const src of sources) {
+    const el = src?.querySelector('[data-testid="tweetText"]');
+    if (el) return el.innerText.trim();
+  }
+  for (const article of document.querySelectorAll('article[data-testid="tweet"]')) {
     const el = article.querySelector('[data-testid="tweetText"]');
-    if (el) return el.innerText.trim();
+    if (el && isVisible(el)) return el.innerText.trim();
   }
-
-  const allArticles = document.querySelectorAll('article[data-testid="tweet"]');
-  for (const a of allArticles) {
-    const el = a.querySelector('[data-testid="tweetText"]');
-    if (el) return el.innerText.trim();
-  }
-
   return null;
 }
 
-function isVisible(el) {
-  const rect = el.getBoundingClientRect();
-  return rect.width > 0 && rect.height > 0;
+function findEditorNearToolBar(toolBar) {
+  let el = toolBar.parentElement;
+  while (el && el !== document.body) {
+    for (const sel of TEXTAREA_SELECTORS) {
+      const editor = el.querySelector(sel);
+      if (editor && isVisible(editor)) return editor;
+    }
+    el = el.parentElement;
+  }
+  return null;
 }
 
-function waitForVisibleElement(selectors, timeout = 8000) {
+function waitForVisibleElement(selectors, timeout = 5000) {
   return new Promise(resolve => {
     const check = () => {
       for (const sel of selectors) {
-        const els = document.querySelectorAll(sel);
-        for (const el of els) {
+        for (const el of document.querySelectorAll(sel)) {
           if (isVisible(el)) return el;
         }
       }
@@ -47,66 +59,56 @@ function waitForVisibleElement(selectors, timeout = 8000) {
 
     const observer = new MutationObserver(() => {
       const el = check();
-      if (el) {
-        observer.disconnect();
-        resolve(el);
-      }
+      if (el) { observer.disconnect(); resolve(el); }
     });
-
     observer.observe(document.body, { childList: true, subtree: true });
-
-    setTimeout(() => {
-      observer.disconnect();
-      resolve(null);
-    }, timeout);
+    setTimeout(() => { observer.disconnect(); resolve(null); }, timeout);
   });
 }
 
-async function insertTextIntoEditor(text) {
-  const editor = await waitForVisibleElement(TEXTAREA_SELECTORS);
+async function insertTextIntoEditor(text, toolBar) {
+  const editor = findEditorNearToolBar(toolBar) ?? await waitForVisibleElement(TEXTAREA_SELECTORS);
   if (!editor) return;
 
-  editor.click();
   editor.focus();
+  document.execCommand('selectAll', false, null);
 
-  const selection = window.getSelection();
-  const range = document.createRange();
-  range.selectNodeContents(editor);
-  selection.removeAllRanges();
-  selection.addRange(range);
+  const dt = new DataTransfer();
+  dt.setData('text/plain', text);
+  editor.dispatchEvent(new ClipboardEvent('paste', {
+    bubbles: true,
+    cancelable: true,
+    clipboardData: dt,
+  }));
+}
 
-  document.execCommand('insertText', false, text);
+function isExtensionAlive() {
+  try { return !!chrome.runtime?.id; } catch { return false; }
 }
 
 function createAiButton() {
   const btn = document.createElement('button');
-  btn.id = AI_BTN_ID;
+  btn.className = AI_BTN_CLASS;
   btn.title = 'AIで返信を生成';
-  btn.setAttribute('type', 'button');
+  btn.type = 'button';
   btn.style.cssText =
     'display:inline-flex;align-items:center;justify-content:center;' +
     'width:34px;height:34px;border:none;background:transparent;' +
     'cursor:pointer;border-radius:50%;padding:0;flex-shrink:0;' +
     'font-size:18px;line-height:1;transition:background 0.2s;';
-
   btn.textContent = '✨';
-
-  btn.addEventListener('mouseenter', () => {
-    btn.style.background = 'rgba(29,155,240,0.1)';
-  });
-  btn.addEventListener('mouseleave', () => {
-    btn.style.background = 'transparent';
-  });
-
+  btn.addEventListener('mouseenter', () => { btn.style.background = 'rgba(29,155,240,0.1)'; });
+  btn.addEventListener('mouseleave', () => { btn.style.background = 'transparent'; });
   return btn;
 }
 
-async function handleAiButtonClick(toolBar) {
-  const btn = document.getElementById(AI_BTN_ID);
-  if (btn) {
-    btn.style.opacity = '0.5';
-    btn.style.pointerEvents = 'none';
-  }
+async function handleAiButtonClick(toolBar, btn) {
+  if (isGenerating) return;
+  if (!isExtensionAlive()) { toolBarObserver.disconnect(); return; }
+
+  isGenerating = true;
+  btn.style.opacity = '0.5';
+  btn.style.pointerEvents = 'none';
 
   try {
     const tweetText = getTweetText(toolBar);
@@ -115,43 +117,48 @@ async function handleAiButtonClick(toolBar) {
     const { apiKey, customPrompt } = await chrome.storage.local.get(['apiKey', 'customPrompt']);
     if (!apiKey) return;
 
-    const prompt = customPrompt || DEFAULT_PROMPT;
-
     const response = await chrome.runtime.sendMessage({
       type: 'GENERATE_REPLY',
       tweetText,
-      prompt,
+      prompt: customPrompt || DEFAULT_PROMPT,
       apiKey,
     });
 
-    if (response?.success) {
-      await insertTextIntoEditor(response.reply);
-    }
+    if (response?.success) await insertTextIntoEditor(response.reply, toolBar);
+  } catch {
+    if (!isExtensionAlive()) toolBarObserver.disconnect();
   } finally {
-    if (btn) {
-      btn.style.opacity = '1';
-      btn.style.pointerEvents = 'auto';
-    }
+    isGenerating = false;
+    btn.style.opacity = '1';
+    btn.style.pointerEvents = 'auto';
   }
 }
 
 function injectAiButton(toolBar) {
-  if (toolBar.querySelector(`#${AI_BTN_ID}`)) return;
+  if (toolBar.querySelector(`.${AI_BTN_CLASS}`)) return;
 
   const btn = createAiButton();
+  if (isGenerating) {
+    btn.style.opacity = '0.5';
+    btn.style.pointerEvents = 'none';
+  }
   btn.addEventListener('click', e => {
     e.stopPropagation();
-    handleAiButtonClick(toolBar);
+    handleAiButtonClick(toolBar, btn).catch(() => {});
   });
-
   toolBar.appendChild(btn);
 }
 
-const toolBarObserver = new MutationObserver(() => {
-  const toolBars = document.querySelectorAll('[data-testid="toolBar"]');
-  for (const toolBar of toolBars) {
-    if (isVisible(toolBar)) {
-      injectAiButton(toolBar);
+const toolBarObserver = new MutationObserver(mutations => {
+  for (const { addedNodes } of mutations) {
+    for (const node of addedNodes) {
+      if (node.nodeType !== Node.ELEMENT_NODE) continue;
+      const toolBars = node.matches('[data-testid="toolBar"]')
+        ? [node]
+        : node.querySelectorAll('[data-testid="toolBar"]');
+      for (const toolBar of toolBars) {
+        if (isVisible(toolBar)) injectAiButton(toolBar);
+      }
     }
   }
 });
