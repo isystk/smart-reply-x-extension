@@ -8,28 +8,13 @@
 
 X（旧Twitter）上でのコミュニケーションを円滑にするためのブラウザ拡張機能です。ユーザーの入力や投稿内容に基づいたスマートな返信をサポートします。
 
-### 対象としている方
+## 📚 対象としている方
 
 - Xでの返信を効率化したい方
-- ブラウザ拡張機能の開発に興味がある方
 
-### 利用している技術
+## 🖥 スクリーンショット
 
-#### インフラ / 実行環境
-- **Google Chrome (Extension API)**
-
-#### 使用しているライブラリ
-- **Backend**: JavaScript (Background Service Worker)
-- **Frontend**: JavaScript, HTML, CSS
-- **Design/Tool**: Manifest V3
-
-```mermaid
-graph TD
-    A[ユーザー] --> B[ポップアップ UI]
-    B --> C[Content Script]
-    C --> D[X ウェブサイト]
-    C <-> E[Background Script]
-```
+![表示例](./image.png)
 
 ## 📦 ディレクトリ構造
 
