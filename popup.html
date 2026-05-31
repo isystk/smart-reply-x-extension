@@ -81,6 +81,13 @@
 
     button:hover { background: #1a8cd8; }
     button:active { background: #1781c9; }
+    button.secondary {
+      background: #eff3f4;
+      color: #0f1419;
+      margin-top: 8px;
+    }
+    button.secondary:hover { background: #e6ecf0; }
+    button.secondary:active { background: #dce3e8; }
 
     #status {
       margin-top: 10px;
@@ -113,6 +120,7 @@
     <textarea id="customPrompt" spellcheck="false"></textarea>
   </div>
 
+  <button id="reset" class="secondary" type="button">デフォルトに戻す</button>
   <button id="save">保存</button>
   <div id="status"></div>
 
