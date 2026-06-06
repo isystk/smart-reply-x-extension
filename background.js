@@ -25,5 +25,39 @@ async function callGemini(apiKey, promptTemplate, tweetText) {
   }
 
   const data = await response.json();
-  return data.candidates[0].content.parts.map(part => part.text || '').join('').trim();
+  const reply = data.candidates[0].content.parts.map(part => part.text || '').join('');
+  return cleanGeneratedReply(reply);
+}
+
+function cleanGeneratedReply(reply) {
+  const text = reply.trim().replace(/\n[ \t]+/g, '\n');
+  const quotedReplies = [...text.matchAll(/["“”「](.+?)["“”」]/gs)]
+    .map(match => cleanupReplyText(match[1]))
+    .filter(isLikelyReply);
+
+  if (quotedReplies.length > 0) return quotedReplies[0];
+
+  return cleanupReplyText(
+    text
+      .split('\n')
+      .filter(line => !isMetaLine(line))
+      .join('\n')
+  );
+}
+
+function cleanupReplyText(text) {
+  return text
+    .trim()
+    .replace(/\s*\(\s*\d+\s*(?:chars?|characters?|文字)\s*\)\s*$/i, '')
+    .replace(/\n[ \t]+/g, '\n')
+    .trim();
+}
+
+function isLikelyReply(text) {
+  return /[ぁ-んァ-ヶ一-龠]/.test(text) && !isMetaLine(text);
+}
+
+function isMetaLine(line) {
+  return /\b(?:let'?s|wait|check|go with|chars?|characters?|professional investor)\b/i.test(line) ||
+    /\b(?:yes|no|ok|ng)\b/i.test(line);
 }
