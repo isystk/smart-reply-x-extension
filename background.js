@@ -31,11 +31,6 @@ async function callGemini(apiKey, promptTemplate, tweetText) {
 
 function cleanGeneratedReply(reply) {
   const text = reply.trim().replace(/\n[ \t]+/g, '\n');
-  const quotedReplies = [...text.matchAll(/["“”「](.+?)["“”」]/gs)]
-    .map(match => cleanupReplyText(match[1]))
-    .filter(isLikelyReply);
-
-  if (quotedReplies.length > 0) return quotedReplies[0];
 
   return cleanupReplyText(
     text
@@ -51,10 +46,6 @@ function cleanupReplyText(text) {
     .replace(/\s*\(\s*\d+\s*(?:chars?|characters?|文字)\s*\)\s*$/i, '')
     .replace(/\n[ \t]+/g, '\n')
     .trim();
-}
-
-function isLikelyReply(text) {
-  return /[ぁ-んァ-ヶ一-龠]/.test(text) && !isMetaLine(text);
 }
 
 function isMetaLine(line) {
