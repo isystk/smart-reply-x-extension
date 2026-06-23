@@ -10,6 +10,24 @@ function isVisible(el) {
   return width > 0 && height > 0;
 }
 
+function getElementDistanceScore(fromEl, toEl) {
+  const fromRect = fromEl.getBoundingClientRect();
+  const toRect = toEl.getBoundingClientRect();
+  const fromCenterY = fromRect.top + fromRect.height / 2;
+  const toCenterY = toRect.top + toRect.height / 2;
+  return Math.abs(fromCenterY - toCenterY);
+}
+
+function findClosestVisibleTweetText(root, toolBar) {
+  const tweetTexts = [...root.querySelectorAll('[data-testid="tweetText"]')].filter(isVisible);
+  if (!tweetTexts.length) return null;
+  if (tweetTexts.length === 1) return tweetTexts[0];
+
+  return tweetTexts
+    .map(el => ({ el, score: getElementDistanceScore(toolBar, el) }))
+    .sort((a, b) => a.score - b.score)[0].el;
+}
+
 function getTweetText(toolBar) {
   const sources = [
     toolBar.closest('article'),
@@ -17,12 +35,15 @@ function getTweetText(toolBar) {
     toolBar.closest('[role="dialog"]'),
   ];
   for (const src of sources) {
-    const el = src?.querySelector('[data-testid="tweetText"]');
+    const el = src ? findClosestVisibleTweetText(src, toolBar) : null;
     if (el) return el.innerText.trim();
   }
-  for (const article of document.querySelectorAll('article[data-testid="tweet"]')) {
-    const el = article.querySelector('[data-testid="tweetText"]');
-    if (el && isVisible(el)) return el.innerText.trim();
+  const visibleTweetTexts = [...document.querySelectorAll('[data-testid="tweetText"]')].filter(isVisible);
+  if (visibleTweetTexts.length) {
+    const el = visibleTweetTexts
+      .map(node => ({ el: node, score: getElementDistanceScore(toolBar, node) }))
+      .sort((a, b) => a.score - b.score)[0].el;
+    if (el) return el.innerText.trim();
   }
   return null;
 }
@@ -67,17 +88,6 @@ function waitForVisibleElement(selectors, timeout = 5000) {
   });
 }
 
-function moveCaretToEnd(editor) {
-  const selection = window.getSelection();
-  if (!selection) return;
-
-  const range = document.createRange();
-  range.selectNodeContents(editor);
-  range.collapse(false);
-  selection.removeAllRanges();
-  selection.addRange(range);
-}
-
 function selectEditorContents(editor) {
   const selection = window.getSelection();
   if (!selection) return;
@@ -91,29 +101,49 @@ function selectEditorContents(editor) {
 function buildPrompt(promptTemplate, tweetText, draftText) {
   if (!draftText) return promptTemplate + tweetText;
 
-  return `${promptTemplate}${tweetText}\n\n**【入力途中の返信】**\n${draftText}\n\n**【依頼】** この入力途中の文を自然に補完してください。出力は続きだけにして、すでに入力済みの文は繰り返さないでください。`;
+  return `${promptTemplate}${tweetText}\n\n**【入力途中の返信】**\n${draftText}\n\n**【依頼】** この入力途中の文の続きを返してください。出力には既に入力済みの文を含めないでください。`;
 }
 
 function normalizeContinuation(reply, draftText) {
-  const text = reply.trim();
-  const draft = draftText.trim();
+  let text = normalizeEditorText(reply);
+  const draft = normalizeEditorText(draftText);
 
   if (!draft) return text;
   if (text === draft) return '';
-  if (text.startsWith(draft)) {
-    return text.slice(draft.length).replace(/^\s+/, '');
+
+  while (text.startsWith(draft)) {
+    text = text.slice(draft.length).trimStart();
   }
 
   return text;
 }
 
+function normalizeEditorText(text) {
+  return text
+    .replace(/\r?\n+/g, ' ')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}
+
+function buildFinalReply(draftText, replyText) {
+  const draft = normalizeEditorText(draftText);
+  const reply = normalizeEditorText(replyText);
+
+  if (!draft) return reply;
+  if (!reply) return draft;
+  if (reply === draft) return draft;
+  if (reply.startsWith(draft)) return reply;
+
+  return `${draft}${reply}`;
+}
+
 function setEditorText(editor, text) {
   editor.focus();
+  const normalized = normalizeEditorText(text);
   selectEditorContents(editor);
   document.execCommand('delete', false, null);
   selectEditorContents(editor);
-  document.execCommand('insertText', false, text);
-  moveCaretToEnd(editor);
+  document.execCommand('insertText', false, normalized);
 }
 
 async function insertTextIntoEditor(text, toolBar, editor = null) {
@@ -170,7 +200,7 @@ async function handleAiButtonClick(toolBar, btn) {
     if (response?.success) {
       const reply = normalizeContinuation(response.reply, draftText);
       if (!reply && !draftText) return;
-      await insertTextIntoEditor(draftText ? draftText + reply : reply, toolBar, editor);
+      await insertTextIntoEditor(buildFinalReply(draftText, reply), toolBar, editor);
     }
   } catch {
     if (!isExtensionAlive()) toolBarObserver.disconnect();
