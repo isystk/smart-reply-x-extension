@@ -1,20 +1,20 @@
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'GENERATE_REPLY') {
-    callGemini(message.apiKey, message.prompt, message.tweetText)
+    callGemini(message.apiKey, message.prompt)
       .then(reply => sendResponse({ success: true, reply }))
       .catch(err => sendResponse({ success: false, error: err.message }));
     return true;
   }
 });
 
-async function callGemini(apiKey, promptTemplate, tweetText) {
+async function callGemini(apiKey, prompt) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
 
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      contents: [{ parts: [{ text: promptTemplate + tweetText }] }],
+      contents: [{ parts: [{ text: prompt }] }],
       generationConfig: { maxOutputTokens: 1024, temperature: 0.7 },
     }),
   });

@@ -1,6 +1,5 @@
 const TEXTAREA_SELECTORS = [
   '[data-testid="tweetTextarea_0"][contenteditable="true"]',
-  '[data-testid="tweetTextarea_0"] [contenteditable="true"]',
 ];
 
 const AI_BTN_CLASS = 'smart-reply-ai-btn';
@@ -40,6 +39,11 @@ function findEditorNearToolBar(toolBar) {
   return null;
 }
 
+function getEditorText(editor) {
+  const text = editor.innerText.replace(/\u200b/g, '').replace(/\n+$/, '');
+  return text.trim() ? text : '';
+}
+
 function waitForVisibleElement(selectors, timeout = 5000) {
   return new Promise(resolve => {
     const check = () => {
@@ -63,20 +67,60 @@ function waitForVisibleElement(selectors, timeout = 5000) {
   });
 }
 
-async function insertTextIntoEditor(text, toolBar) {
-  const editor = findEditorNearToolBar(toolBar) ?? await waitForVisibleElement(TEXTAREA_SELECTORS);
-  if (!editor) return;
+function moveCaretToEnd(editor) {
+  const selection = window.getSelection();
+  if (!selection) return;
 
+  const range = document.createRange();
+  range.selectNodeContents(editor);
+  range.collapse(false);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+function selectEditorContents(editor) {
+  const selection = window.getSelection();
+  if (!selection) return;
+
+  const range = document.createRange();
+  range.selectNodeContents(editor);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+function buildPrompt(promptTemplate, tweetText, draftText) {
+  if (!draftText) return promptTemplate + tweetText;
+
+  return `${promptTemplate}${tweetText}\n\n**【入力途中の返信】**\n${draftText}\n\n**【依頼】** この入力途中の文を自然に補完してください。出力は続きだけにして、すでに入力済みの文は繰り返さないでください。`;
+}
+
+function normalizeContinuation(reply, draftText) {
+  const text = reply.trim();
+  const draft = draftText.trim();
+
+  if (!draft) return text;
+  if (text === draft) return '';
+  if (text.startsWith(draft)) {
+    return text.slice(draft.length).replace(/^\s+/, '');
+  }
+
+  return text;
+}
+
+function setEditorText(editor, text) {
   editor.focus();
-  document.execCommand('selectAll', false, null);
+  selectEditorContents(editor);
+  document.execCommand('delete', false, null);
+  selectEditorContents(editor);
+  document.execCommand('insertText', false, text);
+  moveCaretToEnd(editor);
+}
 
-  const dt = new DataTransfer();
-  dt.setData('text/plain', text);
-  editor.dispatchEvent(new ClipboardEvent('paste', {
-    bubbles: true,
-    cancelable: true,
-    clipboardData: dt,
-  }));
+async function insertTextIntoEditor(text, toolBar, editor = null) {
+  const targetEditor = editor ?? findEditorNearToolBar(toolBar) ?? await waitForVisibleElement(TEXTAREA_SELECTORS);
+  if (!targetEditor) return;
+
+  setEditorText(targetEditor, text);
 }
 
 function isExtensionAlive() {
@@ -111,17 +155,23 @@ async function handleAiButtonClick(toolBar, btn) {
     const tweetText = getTweetText(toolBar);
     if (!tweetText) return;
 
+    const editor = findEditorNearToolBar(toolBar) ?? await waitForVisibleElement(TEXTAREA_SELECTORS);
+    const draftText = editor ? getEditorText(editor) : '';
     const { apiKey, customPrompt } = await chrome.storage.local.get(['apiKey', 'customPrompt']);
     if (!apiKey) return;
 
     const response = await chrome.runtime.sendMessage({
       type: 'GENERATE_REPLY',
       tweetText,
-      prompt: customPrompt || X_REPLY_DEFAULT_PROMPT,
+      prompt: buildPrompt(customPrompt || X_REPLY_DEFAULT_PROMPT, tweetText, draftText),
       apiKey,
     });
 
-    if (response?.success) await insertTextIntoEditor(response.reply, toolBar);
+    if (response?.success) {
+      const reply = normalizeContinuation(response.reply, draftText);
+      if (!reply && !draftText) return;
+      await insertTextIntoEditor(draftText ? draftText + reply : reply, toolBar, editor);
+    }
   } catch {
     if (!isExtensionAlive()) toolBarObserver.disconnect();
   } finally {
