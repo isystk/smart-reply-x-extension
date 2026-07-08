@@ -235,7 +235,7 @@ async function handleQuoteButtonClick(attachmentsRoot, btn) {
     const response = await chrome.runtime.sendMessage({
       type: 'GENERATE_REPLY',
       tweetText,
-      prompt: buildQuotePrompt(customQuotePrompt || customPrompt || X_QUOTE_DEFAULT_PROMPT, tweetText, draftText),
+      prompt: buildQuotePrompt(customQuotePrompt || customPrompt || X_REPLY_DEFAULT_PROMPT, tweetText, draftText),
       apiKey,
     });
 

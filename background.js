@@ -15,7 +15,11 @@ async function callGemini(apiKey, prompt) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { maxOutputTokens: 1024, temperature: 0.7 },
+      generationConfig: {
+        maxOutputTokens: 2048,
+        temperature: 0.7,
+        thinkingConfig: { thinkingBudget: 0 },
+      },
     }),
   });
 
