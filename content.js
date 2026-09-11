@@ -22,6 +22,11 @@ function getTweetText(toolBar) {
     const el = src?.querySelector('[data-testid="tweetText"]');
     if (el) return el.innerText.trim();
   }
+
+  const cellInnerDiv = toolBar.closest('[data-testid="cellInnerDiv"]');
+  const inlineTargetTweet = cellInnerDiv?.querySelector('article[data-testid="tweet"] [data-testid="tweetText"]');
+  if (inlineTargetTweet) return inlineTargetTweet.innerText.trim();
+
   for (const article of document.querySelectorAll('article[data-testid="tweet"]')) {
     const el = article.querySelector('[data-testid="tweetText"]');
     if (el && isVisible(el)) return el.innerText.trim();
